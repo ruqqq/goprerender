@@ -66,7 +66,7 @@ func (p *Prerender) ServeHTTP(rw http.ResponseWriter, r *http.Request, next http
 // ShouldPrerender analyzes the request to determine whether it should be routed
 // to a Prerender.io upstream server.
 func (p *Prerender) ShouldPrerender(or *http.Request) bool {
-	fmt.Println(or)
+	//fmt.Println(or)
 	userAgent := strings.ToLower(or.Header.Get("User-Agent"))
 	bufferAgent := or.Header.Get("X-Bufferbot")
 	isRequestingPrerenderedPage := false
@@ -96,7 +96,7 @@ func (p *Prerender) ShouldPrerender(or *http.Request) bool {
 
 	// Cralwer, request prerender
 	for _, crawlerAgent := range crawlerUserAgents {
-		if strings.Contains(crawlerAgent, strings.ToLower(userAgent)) {
+		if strings.Contains(strings.ToLower(userAgent), crawlerAgent) {
 			isRequestingPrerenderedPage = true
 			break
 		}
