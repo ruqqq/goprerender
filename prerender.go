@@ -11,10 +11,13 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"bytes"
+	"time"
 
 	e "github.com/jqatampa/gadget-arm/errors"
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/urlfetch"
+	"github.com/patrickmn/go-cache"
 )
 
 // Options provides you with the ability to specify a custom Prerender.io URL
@@ -46,11 +49,12 @@ func NewOptions() *Options {
 // upstream server.
 type Prerender struct {
 	Options *Options
+	cache *cache.Cache
 }
 
 // NewPrerender generates a new Prerender instance.
 func (o *Options) NewPrerender() *Prerender {
-	return &Prerender{Options: o}
+	return &Prerender{Options: o, cache: cache.New(6*time.Hour, 6*time.Minute)}
 }
 
 // ServeHTTP allows Prerender to act as a Negroni middleware.
@@ -168,9 +172,21 @@ func (p *Prerender) buildURL(or *http.Request) string {
 // Accept-Encoding=gzip header.  Responses are provided either uncompressed or
 // gzip compressed based on the downstream requests Accept-Encoding header
 func (p *Prerender) PreRenderHandler(rw http.ResponseWriter, or *http.Request) {
+	url := p.buildURL(or)
+
+	cached, found := p.cache.Get(url)
+	if found {
+		cachedByte, ok := cached.([]byte)
+		if ok {
+			reader := bytes.NewReader(cachedByte)
+			io.Copy(rw, reader)
+			return
+		}
+	}
+
 	client := &http.Client{}
 
-	req, err := http.NewRequest("GET", p.buildURL(or), nil)
+	req, err := http.NewRequest("GET", url, nil)
 	e.Check(err)
 
 	if p.Options.Token != "" {
@@ -195,27 +211,21 @@ func (p *Prerender) PreRenderHandler(rw http.ResponseWriter, or *http.Request) {
 	defer res.Body.Close()
 
 	//Figure out whether the client accepts gzip responses
-	doGzip := strings.Contains(or.Header.Get("Accept-Encoding"), "gzip")
+	//doGzip := strings.Contains(or.Header.Get("Accept-Encoding"), "gzip")
 	isGzip := strings.Contains(res.Header.Get("Content-Encoding"), "gzip")
 
-	if doGzip && !isGzip {
-		// gzip raw response
-		rw.Header().Set("Content-Encoding", "gzip")
-		gz := gzip.NewWriter(rw)
-		defer gz.Close()
-		io.Copy(gz, res.Body)
-		gz.Flush()
-
-	} else if !doGzip && isGzip {
-		// gunzip response
+	// Get the data
+	buf := new(bytes.Buffer)
+	if isGzip {
 		gz, err := gzip.NewReader(res.Body)
 		e.Check(err)
 		defer gz.Close()
-		io.Copy(rw, gz)
+		io.Copy(buf, gz)
+		p.cache.Set(url, buf.Bytes(), cache.DefaultExpiration)
 	} else {
-		// Pass through, gzip/gzip or raw/raw
-		rw.Header().Set("Content-Encoding", res.Header.Get("Content-Encoding"))
-		io.Copy(rw, res.Body)
-
+		io.Copy(buf, res.Body)
+		p.cache.Set(url, buf.Bytes(), cache.DefaultExpiration)
 	}
+
+	io.Copy(rw, buf)
 }
