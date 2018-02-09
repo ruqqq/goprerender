@@ -17,6 +17,7 @@ var crawlerUserAgents = [...]string{
 	"pinterest",
 	"developers.google.com/+/web/snippet",
 	"slackbot",
+	"whatsapp",
 }
 
 var skippedTypes = [...]string{
